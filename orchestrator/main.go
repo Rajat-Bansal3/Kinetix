@@ -11,11 +11,18 @@ import (
 
 	pb "Rajat-Bansal3/orchestrator/proto"
 
+	rh "Rajat-Bansal3/orchestrator/internals/redis_handler"
+
+	routes "Rajat-Bansal3/orchestrator/routes"
+
+	"github.com/go-redis/redis/v8"
+	"github.com/labstack/echo/v5"
 	"google.golang.org/grpc"
 )
 
 var (
-    port  = flag.Int("port" , 50051 , "port the server is running on")
+    port_grpc  = flag.Int("port-grpc" , 50051 , "port the GRPC server is running on")
+    port_http  = flag.Int("port-http" , 5000 , "port the HTTP server is running on")
 )
 
 type Agent struct {
@@ -132,19 +139,39 @@ func (s *OrchestratorServer)Subscribe(stream pb.Orchestrator_SubscribeServer)err
 
 func main (){
     flag.Parse()
-	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port))
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	grpcServer := grpc.NewServer()
-    s := &OrchestratorServer{
-        registry: &AgentRegistry{
-            agents: make(map[string]*Agent),
-        },
+	go func(){
+        lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port_grpc))
+        if err != nil {
+            log.Fatalf("failed to listen: %v", err)
+        }
+        
+        grpcServer := grpc.NewServer()
+        s := &OrchestratorServer{
+            registry: &AgentRegistry{
+                agents: make(map[string]*Agent),
+            },
+        }
+        pb.RegisterOrchestratorServer(grpcServer, s)
+        log.Printf("GRPC server running on port %d", *port_grpc)
+        if err := grpcServer.Serve(lis); err != nil {
+            log.Fatal(err)
+        }
+    }()
+    e := echo.New()
+    
+    rdb := redis.NewClient(&redis.Options{
+        Addr:     "localhost:6379",
+        Password: "",
+        DB:       0,
+    })
+
+    redisSvc := rh.NewHandler(rdb)
+    routes.SetupHttpRoutes(e, redisSvc)
+
+    log.Printf("HTTP server running on port %d", *port_http)
+    
+    if err := e.Start(":1323"); err != nil {
+        log.Fatal("failed to start server", "error", err)
     }
-    pb.RegisterOrchestratorServer(grpcServer, s)
-    log.Printf("Server running on port %d", *port)
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatal(err)
-	}
+
 }
