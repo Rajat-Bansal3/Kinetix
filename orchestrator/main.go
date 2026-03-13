@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -40,16 +42,53 @@ type Agent struct {
 type AgentRegistry struct {
     mu sync.RWMutex
     agents map[string]*Agent
+    ids    []string 
+    next   int
 }
 
 type OrchestratorServer struct{
     pb.UnimplementedOrchestratorServer
     registry *AgentRegistry
 }
+type Job struct {
+    JobID string 
+    Type string `json:"type" validate:"required"`
+    Priority int `json:"priority" validate:"min=0,max=10"`
+    Payload map[string]interface{} `json:"payload" validate:"required"`
+    Metadata map[string]string `json:"metadata"`
+}
+
+func (s *OrchestratorServer)AssignTasks(task Job)error {
+    log.Printf("task %s" , task.JobID)
+    s.registry.mu.Lock()
+    if len(s.registry.ids) == 0 {
+        s.registry.mu.Unlock()
+        return fmt.Errorf("no agents available to take the job")
+    }
+    targetId := s.registry.ids[s.registry.next]
+    agent := s.registry.agents[targetId]
+    s.registry.next = (s.registry.next + 1) % len(s.registry.ids)
+
+    s.registry.mu.Unlock()
+
+    payloadBytes, _ := json.Marshal(task)
+
+    return agent.Stream.Send(&pb.BrainSignal{
+        Event: &pb.BrainSignal_Task{
+            Task: &pb.TaskAssignment{
+                TaskId:     task.JobID,
+                WasmBinary: payloadBytes,
+            },
+        },
+    })
+}
 
 func (r *AgentRegistry) Register(sig *pb.WorkerSignal , stream pb.Orchestrator_SubscribeServer) {
     r.mu.Lock()
     defer r.mu.Unlock()
+    if _ , exists := r.agents[sig.WorkerId]; !exists {
+        r.ids = append(r.ids, sig.WorkerId)
+    }
     r.agents[sig.WorkerId] = &Agent{
         ID: sig.WorkerId,
         Stream: stream,
@@ -60,6 +99,7 @@ func (r *AgentRegistry) Register(sig *pb.WorkerSignal , stream pb.Orchestrator_S
         AvailableMemory: sig.AvailableMemory,
         Status: sig.Status,
     };
+
 }
 
 func (r *AgentRegistry) Unregister(id string){
@@ -139,26 +179,6 @@ func (s *OrchestratorServer)Subscribe(stream pb.Orchestrator_SubscribeServer)err
 
 func main (){
     flag.Parse()
-	go func(){
-        lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port_grpc))
-        if err != nil {
-            log.Fatalf("failed to listen: %v", err)
-        }
-        
-        grpcServer := grpc.NewServer()
-        s := &OrchestratorServer{
-            registry: &AgentRegistry{
-                agents: make(map[string]*Agent),
-            },
-        }
-        pb.RegisterOrchestratorServer(grpcServer, s)
-        log.Printf("GRPC server running on port %d", *port_grpc)
-        if err := grpcServer.Serve(lis); err != nil {
-            log.Fatal(err)
-        }
-    }()
-    e := echo.New()
-    
     rdb := redis.NewClient(&redis.Options{
         Addr:     "localhost:6379",
         Password: "",
@@ -166,11 +186,52 @@ func main (){
     })
 
     redisSvc := rh.NewHandler(rdb)
+    s := &OrchestratorServer{
+            registry: &AgentRegistry{
+                agents: make(map[string]*Agent),
+            },
+        }
+	go func(){
+        lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port_grpc))
+        if err != nil {
+            log.Fatalf("failed to listen: %v", err)
+        }
+        
+        grpcServer := grpc.NewServer()
+        
+        pb.RegisterOrchestratorServer(grpcServer, s)
+        log.Printf("GRPC server running on port %d", *port_grpc)
+        if err := grpcServer.Serve(lis); err != nil {
+            log.Fatal(err)
+        }
+    }()
+    go func(){
+        for{
+            jobData , err := redisSvc.Redis.BRPop(context.Background() , 5*time.Second , "tasks:pending").Result()
+            if err != nil {
+                if err == redis.Nil {
+                    continue
+                }
+                log.Printf("Redis Error: %v", err)
+                time.Sleep(time.Second) 
+                continue
+            }
+            job := Job{}
+            if err := json.Unmarshal([]byte(jobData[1]), &job); err != nil {
+                log.Printf("Payload corruption: %v", err)
+                continue
+            }
+            s.AssignTasks(job)
+        }
+    }()
+    e := echo.New()
+    
+    
     routes.SetupHttpRoutes(e, redisSvc)
 
     log.Printf("HTTP server running on port %d", *port_http)
     
-    if err := e.Start(":1323"); err != nil {
+    if err := e.Start(fmt.Sprintf(":%d" , *port_http)); err != nil {
         log.Fatal("failed to start server", "error", err)
     }
 

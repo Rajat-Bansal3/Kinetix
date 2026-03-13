@@ -1,6 +1,8 @@
 package redishandler
 
-import "github.com/go-redis/redis/v8"
+import (
+	"github.com/go-redis/redis/v8"
+)
 
 type Handler struct {
     Redis *redis.Client
