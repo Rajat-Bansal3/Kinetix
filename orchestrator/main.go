@@ -58,7 +58,7 @@ type Job struct {
     Metadata map[string]string `json:"metadata"`
 }
 
-func (s *OrchestratorServer)AssignTasks(task Job)error {
+func (s *OrchestratorServer)AssignTasks(ctx context.Context , rdb *redis.Client , task Job)error {
     log.Printf("task %s" , task.JobID)
     s.registry.mu.Lock()
     if len(s.registry.ids) == 0 {
@@ -72,6 +72,11 @@ func (s *OrchestratorServer)AssignTasks(task Job)error {
     s.registry.mu.Unlock()
 
     payloadBytes, _ := json.Marshal(task)
+    _ , err := rdb.HSet(ctx, "job_owners", task.JobID, targetId).Result()
+
+    if err != nil {
+        return fmt.Errorf("error setting owner hash")
+    }
 
     return agent.Stream.Send(&pb.BrainSignal{
         Event: &pb.BrainSignal_Task{
@@ -81,6 +86,47 @@ func (s *OrchestratorServer)AssignTasks(task Job)error {
             },
         },
     })
+}
+func (s *OrchestratorServer) reclaimJob (ctx context.Context , rdb *redis.Client , id string){
+    processingJobs, err := rdb.LRange(ctx, "tasks:processing", 0, -1).Result()
+    if err != nil {
+        return
+    }
+    for _, jobJson := range processingJobs {
+        var job Job
+        if err := json.Unmarshal([]byte(jobJson), &job); err != nil {
+            continue
+        }
+        owner , _ := rdb.HGet(ctx , "job_owners" , job.JobID).Result()
+        if owner == id {
+            rdb.LRem(ctx, "tasks:processing", 1, jobJson)
+            rdb.LPush(ctx, "tasks:pending", jobJson)
+            rdb.HDel(ctx, "job_owners", job.JobID)
+        }
+    }
+}
+func (s *OrchestratorServer) reaper (ctx context.Context , rdb *redis.Client){
+    ticker := time.NewTicker(10 * time.Second)
+    for {
+        select {
+        case <- ctx.Done():
+            return
+        case <- ticker.C :
+           deadAgents := []string{}
+            s.registry.mu.RLock()
+            for id, agent := range s.registry.agents {
+                if time.Since(agent.LastHeartbeat) > 15*time.Second {
+                    deadAgents = append(deadAgents, id)
+                }
+            }
+            s.registry.mu.RUnlock()
+
+            for _, id := range deadAgents {
+                s.registry.Unregister(id) 
+                s.reclaimJob(ctx, rdb, id)
+            }
+        }
+    }
 }
 
 func (r *AgentRegistry) Register(sig *pb.WorkerSignal , stream pb.Orchestrator_SubscribeServer) {
@@ -106,6 +152,16 @@ func (r *AgentRegistry) Unregister(id string){
     r.mu.Lock()
     defer r.mu.Unlock()
     delete(r.agents , id)
+    
+    for i , v := range r.ids {
+        if v==id {
+            r.ids = append(r.ids[:i] , r.ids[i+1:]...)
+            if len(r.ids) == 0 || r.next >= len(r.ids) {
+                r.next = 0
+            }
+            break
+        }
+    }
 }
 
 func (r *AgentRegistry) GetStream(id string) (pb.Orchestrator_SubscribeServer, bool) {
@@ -207,7 +263,7 @@ func main (){
     }()
     go func(){
         for{
-            jobData , err := redisSvc.Redis.BRPop(context.Background() , 5*time.Second , "tasks:pending").Result()
+            jobData , err := redisSvc.Redis.BRPopLPush(context.Background() , "tasks:pending", "tasks:processing",5*time.Second ).Result()
             if err != nil {
                 if err == redis.Nil {
                     continue
@@ -217,13 +273,14 @@ func main (){
                 continue
             }
             job := Job{}
-            if err := json.Unmarshal([]byte(jobData[1]), &job); err != nil {
+            if err := json.Unmarshal([]byte(jobData), &job); err != nil {
                 log.Printf("Payload corruption: %v", err)
                 continue
             }
-            s.AssignTasks(job)
+            s.AssignTasks(rdb.Context() , rdb , job)
         }
     }()
+    go s.reaper(rdb.Context() , rdb)
     e := echo.New()
     
     
