@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package kinetix;
+
+option go_package = "github.com/Rajat-Bansal3/kinetix/shared/proto";
+
+service Orchestrator {
+  rpc Subscribe(stream WorkerSignal) returns (stream BrainSignal) {}
+}
+
+message WorkerSignal {
+  string worker_id = 1;
+  float cpu_percentage = 2;
+  uint32 total_cores = 3;
+  uint32 total_memory = 4;
+  uint32 available_memory = 5;
+  WorkerStatus status = 6;
+  string integrity_report = 7;
+}
+
+enum WorkerStatus {
+  IDLE = 0;
+  BUSY = 1;
+  TERMINATING = 2;
+  CRITICAL_RESOURCE = 3;
+}
+
+message BrainSignal {
+  oneof event {
+    TaskAssignment task = 1;
+    HeartbeatAck ack = 2;
+  }
+}
+
+message TaskAssignment {
+  string task_id = 1;
+  bytes wasm_binary = 2;      
+  uint32 fuel_limit = 3;      
+  map<string, string> env = 4; 
+}
+
+message HeartbeatAck {
+  int64 server_time = 1;
+}
