@@ -132,6 +132,7 @@ func (s *OrchestratorServer) reaper (ctx context.Context , rdb *redis.Client){
 func (r *AgentRegistry) Register(sig *pb.WorkerSignal , stream pb.Orchestrator_SubscribeServer) {
     r.mu.Lock()
     defer r.mu.Unlock()
+    println("Registered")
     if _ , exists := r.agents[sig.WorkerId]; !exists {
         r.ids = append(r.ids, sig.WorkerId)
     }
@@ -189,28 +190,34 @@ func (r *AgentRegistry) UpdateHealth(signal *pb.WorkerSignal) {
 }
 func (s *OrchestratorServer)Subscribe(stream pb.Orchestrator_SubscribeServer)error{
     var workerId string;
+    println("req rec")
+    method, ok := grpc.MethodFromServerStream(stream)
+    fmt.Printf(">>> Client is hitting method: %s (OK: %v)\n", method, ok)
     defer func() {
         if workerId != "" {
+            println("req rec1")
             s.registry.Unregister(workerId)
             log.Printf("Worker %s disconnected", workerId)
         }
     }()
     for {
         workerSignal, err := stream.Recv()
+        println("reached here")
         if err == io.EOF {
-            if workerId != ""{
-                s.registry.Unregister(workerId)
-            }
+            fmt.Printf(">>> [DEBUG] Recv Error: %v\n", err)
+            log.Printf("Worker %s closed connection gracefully", workerId)
+            
             return nil
         }
         if err != nil {
+            fmt.Printf(">>> [DEBUG] Recv Error: %v\n", err)
             return err
         }
         if workerId == ""{
             workerId = workerSignal.WorkerId
             s.registry.Register(workerSignal , stream)
         }
-        log.Printf(
+        log.Printf( 
             "Worker %s | CORES %d | CPU %.2f | Total_Memory %d | Available_Memory %d | Status %v",
             workerSignal.WorkerId,
             workerSignal.TotalCores,
@@ -230,6 +237,37 @@ func (s *OrchestratorServer)Subscribe(stream pb.Orchestrator_SubscribeServer)err
         err != nil {
 	        return err
         }
+    }
+}
+
+func (s *OrchestratorServer)debug_loop() {
+    ticker := time.NewTicker(5 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        <-ticker.C
+        s.registry.mu.RLock()
+        
+        fmt.Println("\n--- 🔍 Orchestrator Internal State ---")
+        fmt.Printf("Total Registered Agents: %d\n", len(s.registry.agents))
+        fmt.Printf("Round-Robin Next Index:  %d\n", s.registry.next)
+        
+        if len(s.registry.agents) > 0 {
+            fmt.Printf("%-15s | %-10s | %-6s | %-8s\n", "WORKER ID", "STATUS", "CPU %", "MEM AVAIL")
+            for id, agent := range s.registry.agents {
+                fmt.Printf("%-15s | %-10v | %-6.2f | %-8d MB\n", 
+                    id, 
+                    agent.Status, 
+                    agent.CPU, 
+                    agent.AvailableMemory,
+                )
+            }
+        } else {
+            fmt.Println("No agents currently connected.")
+        }
+        fmt.Println("--------------------------------------")
+        
+        s.registry.mu.RUnlock()
     }
 }
 
@@ -280,7 +318,8 @@ func main (){
             s.AssignTasks(rdb.Context() , rdb , job)
         }
     }()
-    go s.reaper(rdb.Context() , rdb)
+    go s.reaper(context.Background() , rdb)
+    go s.debug_loop()
     e := echo.New()
     
     
