@@ -18,6 +18,7 @@ import (
 	routes "Rajat-Bansal3/orchestrator/routes"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"google.golang.org/grpc"
 )
@@ -105,6 +106,7 @@ func (s *OrchestratorServer) reclaimJob (ctx context.Context , rdb *redis.Client
         }
     }
 }
+
 func (s *OrchestratorServer) reaper (ctx context.Context , rdb *redis.Client){
     ticker := time.NewTicker(10 * time.Second)
     for {
@@ -149,14 +151,22 @@ func (r *AgentRegistry) Register(sig *pb.WorkerSignal , stream pb.Orchestrator_S
 
 }
 
-func (r *AgentRegistry) Unregister(id string){
+func (r *AgentRegistry) Unregister(id string) {
     r.mu.Lock()
     defer r.mu.Unlock()
-    delete(r.agents , id)
-    
-    for i , v := range r.ids {
-        if v==id {
-            r.ids = append(r.ids[:i] , r.ids[i+1:]...)
+
+    agent, ok := r.agents[id]
+    if !ok {
+        return
+    }
+    if time.Since(agent.LastHeartbeat) < 15*time.Second {
+        return
+    }
+
+    delete(r.agents, id)
+    for i, v := range r.ids {
+        if v == id {
+            r.ids = append(r.ids[:i], r.ids[i+1:]...)
             if len(r.ids) == 0 || r.next >= len(r.ids) {
                 r.next = 0
             }
@@ -189,44 +199,28 @@ func (r *AgentRegistry) UpdateHealth(signal *pb.WorkerSignal) {
     agent.Status = signal.Status
 }
 func (s *OrchestratorServer)Subscribe(stream pb.Orchestrator_SubscribeServer)error{
-    var workerId string;
-    println("req rec")
-    method, ok := grpc.MethodFromServerStream(stream)
-    fmt.Printf(">>> Client is hitting method: %s (OK: %v)\n", method, ok)
-    defer func() {
-        if workerId != "" {
-            println("req rec1")
+    var workerId = uuid.New().String();
+    defer func() {        
             s.registry.Unregister(workerId)
             log.Printf("Worker %s disconnected", workerId)
-        }
     }()
+    registered := false
     for {
         workerSignal, err := stream.Recv()
-        println("reached here")
         if err == io.EOF {
-            fmt.Printf(">>> [DEBUG] Recv Error: %v\n", err)
             log.Printf("Worker %s closed connection gracefully", workerId)
-            
             return nil
         }
         if err != nil {
-            fmt.Printf(">>> [DEBUG] Recv Error: %v\n", err)
             return err
         }
-        if workerId == ""{
-            workerId = workerSignal.WorkerId
+        workerSignal.WorkerId = workerId
+        if !registered {
             s.registry.Register(workerSignal , stream)
+            registered = true
+        }else {
+            s.registry.UpdateHealth(workerSignal)
         }
-        log.Printf( 
-            "Worker %s | CORES %d | CPU %.2f | Total_Memory %d | Available_Memory %d | Status %v",
-            workerSignal.WorkerId,
-            workerSignal.TotalCores,
-            workerSignal.CpuPercentage,
-            workerSignal.TotalMemory,
-            workerSignal.AvailableMemory,
-            workerSignal.Status,
-        )
-        if workerId != "" {s.registry.UpdateHealth(workerSignal)}
         if err := stream.Send(&pb.BrainSignal{
 	        Event: &pb.BrainSignal_Ack{
 		        Ack: &pb.HeartbeatAck{
