@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -21,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 var (
@@ -35,8 +35,8 @@ type Agent struct {
     LastHeartbeat time.Time
     CPU float32
     TotalCores uint32
-    TotalMemory uint32
-    AvailableMemory uint32
+    TotalMemory uint64
+    AvailableMemory uint64
     Status pb.WorkerStatus
 }
 
@@ -50,47 +50,47 @@ type AgentRegistry struct {
 type OrchestratorServer struct{
     pb.UnimplementedOrchestratorServer
     registry *AgentRegistry
+    rdb      *redis.Client
+
 }
 type Payload struct {
     StringWasm string `json:"string_wasm"`
     Binary     []byte `json:"binary"`
 }
-type Job struct {
-    JobID string `json:"job_id"`
-    Type string `json:"type" validate:"required"`
-    Priority int `json:"priority" validate:"min=0,max=10"`
-    Payload Payload `json:"payload" validate:"required"`
-    Metadata map[string]string `json:"metadata"`
-}
 
-func (s *OrchestratorServer)AssignTasks(ctx context.Context , rdb *redis.Client , task Job)error {
-    log.Printf("task %s" , task.JobID)
+func (s *OrchestratorServer)AssignTasks(ctx context.Context , rdb *redis.Client , task *pb.TaskAssignment)error {
+    fmt.Printf("task:assignTask: %+v\n", task)
+    log.Printf("task %s" , task.TaskId)
     s.registry.mu.Lock()
     if len(s.registry.ids) == 0 {
         s.registry.mu.Unlock()
         return fmt.Errorf("no agents available to take the job")
     }
-    if task.Payload.StringWasm == "" && len(task.Payload.Binary) == 0 {
-        return fmt.Errorf("either string_wasm or binary must be provided")
+    if len(task.WasmBinary) == 0 {
+        s.registry.mu.Unlock()
+        return fmt.Errorf("binary must be provided")
     }
     targetId := s.registry.ids[s.registry.next]
     agent := s.registry.agents[targetId]
     s.registry.next = (s.registry.next + 1) % len(s.registry.ids)
-
     s.registry.mu.Unlock()
-    fmt.Println(task.Payload.StringWasm)
-    payloadBytes := task.Payload.StringWasm
-    _ , err := rdb.HSet(ctx, "job_owners", task.JobID, targetId).Result()
 
-    if err != nil {
-        return fmt.Errorf("error setting owner hash")
+    payloadBytes := task.WasmBinary
+    _ , err := rdb.HSet(ctx, "job_owners", task.TaskId, targetId).Result()
+    taskMarshal , _ := protojson.Marshal(task)
+    _, e := rdb.HSet(ctx, "jobs", task.TaskId , taskMarshal).Result()
+
+    if (err != nil) || (e != nil) {
+        return fmt.Errorf("error setting owner hash or setting job details")
     }
-    println(payloadBytes)
+    println("Reached here")
     return agent.Stream.Send(&pb.BrainSignal{
         Event: &pb.BrainSignal_Task{
             Task: &pb.TaskAssignment{
-                TaskId:     task.JobID,
+                TaskId:     task.TaskId,
                 WasmBinary: []byte(payloadBytes),
+                FuelLimit:  task.FuelLimit,
+                Env: task.Env,
             },
         },
     })
@@ -101,15 +101,15 @@ func (s *OrchestratorServer) reclaimJob (ctx context.Context , rdb *redis.Client
         return
     }
     for _, jobJson := range processingJobs {
-        var job Job
-        if err := json.Unmarshal([]byte(jobJson), &job); err != nil {
+        var job pb.TaskAssignment
+        if err := protojson.Unmarshal([]byte(jobJson), &job); err != nil {
             continue
         }
-        owner , _ := rdb.HGet(ctx , "job_owners" , job.JobID).Result()
+        owner , _ := rdb.HGet(ctx , "job_owners" , job.TaskId).Result()
         if owner == id {
             rdb.LRem(ctx, "tasks:processing", 1, jobJson)
             rdb.LPush(ctx, "tasks:pending", jobJson)
-            rdb.HDel(ctx, "job_owners", job.JobID)
+            rdb.HDel(ctx, "job_owners", job.TaskId)
         }
     }
 }
@@ -189,6 +189,32 @@ func (r *AgentRegistry) GetStream(id string) (pb.Orchestrator_SubscribeServer, b
     stream, ok := r.agents[id]
     return stream.Stream, ok
 }
+
+func(s *OrchestratorServer) Result(sig *pb.WorkerSignal){
+    result := sig.Result
+    ctx := context.Background()
+    log.Printf("Task %s completed | status: %v | exit_code: %d | error: %s",
+        result.TaskId, result.Status, result.ExitCode, result.Error)
+    switch result.Status{
+        case pb.TaskStatus_SUCCESS:
+            s.rdb.LRem(ctx , "tasks:processing" , 1 , result.TaskId)
+            s.rdb.HDel(ctx , "job_owners" , result.TaskId)
+            s.rdb.HSet(ctx , "job_completed", result.TaskId, result.ExitCode)
+            s.rdb.HDel(ctx , "jobs", result.TaskId)
+
+        case pb.TaskStatus_REJECTED , pb.TaskStatus_FAILED:
+            s.rdb.LRem(ctx , "tasks:processing" , 1 , result.TaskId)
+            s.rdb.HDel(ctx , "job_owners" , result.TaskId)
+            jobJson, err := s.rdb.HGet(ctx, "jobs", result.TaskId).Result()
+            if err != nil {
+                log.Printf("could not find job data for %s, job lost", result.TaskId)
+                return
+            }
+            s.rdb.LPush(ctx, "tasks:pending", jobJson)
+
+    }
+}
+
 func (r *AgentRegistry) UpdateHealth(signal *pb.WorkerSignal) {
     r.mu.Lock()
     defer r.mu.Unlock()
@@ -227,6 +253,9 @@ func (s *OrchestratorServer)Subscribe(stream pb.Orchestrator_SubscribeServer)err
             registered = true
         }else {
             s.registry.UpdateHealth(workerSignal)
+            if workerSignal.Result != nil{
+                s.Result(workerSignal)
+            }
         }
         if err := stream.Send(&pb.BrainSignal{
 	        Event: &pb.BrainSignal_Ack{
@@ -285,6 +314,7 @@ func main (){
             registry: &AgentRegistry{
                 agents: make(map[string]*Agent),
             },
+            rdb: rdb,
         }
 	go func(){
         lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port_grpc))
@@ -314,13 +344,15 @@ func main (){
                 time.Sleep(time.Second) 
                 continue
             }
-            job := Job{}
-            println(jobData)
-            if err := json.Unmarshal([]byte(jobData), &job); err != nil {
-                log.Printf("Payload corruption: %v", err)
-                continue
+            job := &pb.TaskAssignment{}
+            if er := protojson.Unmarshal([]byte(jobData), job); er != nil {
+                fmt.Println("error unmarshling job:main")
             }
-            s.AssignTasks(rdb.Context() , rdb , job)
+            fmt.Printf("task:main: %+v\n", job)
+
+            if err := s.AssignTasks(rdb.Context(), rdb, job); err != nil {
+                log.Printf("AssignTasks failed: %v", err)
+            }
         }
     }()
     go s.reaper(context.Background() , rdb)

@@ -49,11 +49,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(signal) = inbound_stream.message().await? {
         match signal.event {
             Some(pb::brain_signal::Event::Task(task)) => {
-                println!("Task: {}", task.task_id);
+                let mut sys = sysinfo::System::new_all();
+                sys.refresh_memory();
+                let available = sys.available_memory();
+                let total = sys.total_memory();
                 tasks_state.set_status(WorkerStatus::Busy);
-                tasks_state.perform_task(task);
-                if let Err(e) = tasks_state.execute_task() {
-                    eprintln!("execute_task error: {}", e);
+                let task_id = task.task_id.clone();
+                println!("Reached here");
+
+                match tasks_state.perform_task(task, available, total) {
+                    Err(e) => {
+                        eprintln!("task rejected: {}", e);
+                        tx.send(WorkerSignal {
+                            status: tasks_state.get_status() as i32,
+                            result: Some(pb::TaskResult {
+                                task_id: task_id,
+                                status: pb::TaskStatus::Rejected as i32,
+                                error: e,
+                                completed_at: chrono::Utc::now().timestamp(),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        })
+                        .await
+                        .ok();
+                        continue;
+                    }
+                    Ok(_) => {
+                        println!("Reached here");
+                        if let Err(e) = tasks_state.execute_task(available, tx.clone()) {
+                            eprintln!("execute_task error: {}", e);
+                        }
+                    }
                 }
             }
             Some(pb::brain_signal::Event::Ack(ack)) => {

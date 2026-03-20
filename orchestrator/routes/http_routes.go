@@ -2,54 +2,77 @@ package routes
 
 import (
 	rh "Rajat-Bansal3/orchestrator/internals/redis_handler"
-	"encoding/json"
+	pb "Rajat-Bansal3/orchestrator/proto"
+	"encoding/base64"
 	"log"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
-type CreateJobRequest struct {
-    JobID string 
-    Type string `json:"type" validate:"required"`
-    Priority int `json:"priority" validate:"min=0,max=10"`
-    Payload map[string]interface{} `json:"payload" validate:"required"`
-    Metadata map[string]string `json:"metadata"`
+type Payload struct {
+    StringWasm string `json:"string_wasm"`
+    Binary     string `json:"binary"`
 }
 
+type CreateJobRequest struct {
+    Type      string            `json:"type"`
+    Priority  int               `json:"priority"`
+    Payload   Payload           `json:"payload"`
+    Metadata  map[string]string `json:"metadata"`
+    FuelLimit uint64            `json:"fuel_limit"`
+}
 
-func SetupHttpRoutes (e *echo.Echo , redis *rh.Handler){
+func SetupHttpRoutes(e *echo.Echo, redis *rh.Handler) {
     api := e.Group("/api")
 
-    api.POST("/job" , func(c *echo.Context) error {
+    api.POST("/job", func(c *echo.Context) error {
         req := new(CreateJobRequest)
         if err := c.Bind(req); err != nil {
-            return c.JSON(http.StatusBadRequest , map[string]string{"error": "Invalid format"})
+            return c.JSON(http.StatusBadRequest, map[string]string{"error": "bad request body"})
         }
-        
-        req.JobID = uuid.NewString() 
-        if req.Type == "" || len(req.Payload) == 0 {
-           return c.JSON(http.StatusBadRequest, map[string]string{
-                "error": "Validation failed: 'type' and 'payload' are required",
-            })
+        if req.Type == "" {
+            return c.JSON(http.StatusBadRequest, map[string]string{"error": "type missing"})
+        }
+        if req.Payload.StringWasm == "" && req.Payload.Binary == "" {
+            return c.JSON(http.StatusBadRequest, map[string]string{"error": "no wasm provided"})
         }
 
-        taskBytes, err := json.Marshal(req)
+        var wasmBytes []byte
+        if req.Payload.Binary != "" {
+            decoded, err := base64.StdEncoding.DecodeString(req.Payload.Binary)
+            if err != nil {
+                return c.JSON(http.StatusBadRequest, map[string]string{"error": "binary not valid base64"})
+            }
+            wasmBytes = decoded
+        } else {
+            wasmBytes = []byte(req.Payload.StringWasm)
+        }
+
+
+
+        task := &pb.TaskAssignment{
+            TaskId:     uuid.NewString(),
+            WasmBinary: wasmBytes,
+            FuelLimit:  req.FuelLimit,
+            Env:        req.Metadata,
+        }
+
+        taskBytes, err := protojson.Marshal(task)
         if err != nil {
-            return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to encode task"})
+            return c.JSON(http.StatusInternalServerError, map[string]string{"error": "encode failed"})
         }
 
-        err = redis.Redis.LPush(c.Request().Context(), "tasks:pending", taskBytes).Err()
-
-        if err != nil {
-            log.Printf("Redis error: %v", err)
-            return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Queue unavailable"})
+        if err := redis.Redis.LPush(c.Request().Context(), "tasks:pending", taskBytes).Err(); err != nil {
+            log.Printf("redis lpush: %v", err)
+            return c.JSON(http.StatusInternalServerError, map[string]string{"error": "queue down"})
         }
+
         return c.JSON(http.StatusAccepted, map[string]string{
-            "message": "Job queued successfully",
-            "job_id":  req.JobID,
+            "message": "queued",
+            "job_id":  task.TaskId,
         })
     })
-
 }
