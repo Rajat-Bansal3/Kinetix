@@ -51,11 +51,15 @@ type OrchestratorServer struct{
     pb.UnimplementedOrchestratorServer
     registry *AgentRegistry
 }
+type Payload struct {
+    StringWasm string `json:"string_wasm"`
+    Binary     []byte `json:"binary"`
+}
 type Job struct {
-    JobID string 
+    JobID string `json:"job_id"`
     Type string `json:"type" validate:"required"`
     Priority int `json:"priority" validate:"min=0,max=10"`
-    Payload map[string]interface{} `json:"payload" validate:"required"`
+    Payload Payload `json:"payload" validate:"required"`
     Metadata map[string]string `json:"metadata"`
 }
 
@@ -66,24 +70,27 @@ func (s *OrchestratorServer)AssignTasks(ctx context.Context , rdb *redis.Client 
         s.registry.mu.Unlock()
         return fmt.Errorf("no agents available to take the job")
     }
+    if task.Payload.StringWasm == "" && len(task.Payload.Binary) == 0 {
+        return fmt.Errorf("either string_wasm or binary must be provided")
+    }
     targetId := s.registry.ids[s.registry.next]
     agent := s.registry.agents[targetId]
     s.registry.next = (s.registry.next + 1) % len(s.registry.ids)
 
     s.registry.mu.Unlock()
-
-    payloadBytes, _ := json.Marshal(task)
+    fmt.Println(task.Payload.StringWasm)
+    payloadBytes := task.Payload.StringWasm
     _ , err := rdb.HSet(ctx, "job_owners", task.JobID, targetId).Result()
 
     if err != nil {
         return fmt.Errorf("error setting owner hash")
     }
-
+    println(payloadBytes)
     return agent.Stream.Send(&pb.BrainSignal{
         Event: &pb.BrainSignal_Task{
             Task: &pb.TaskAssignment{
                 TaskId:     task.JobID,
-                WasmBinary: payloadBytes,
+                WasmBinary: []byte(payloadBytes),
             },
         },
     })
@@ -295,6 +302,9 @@ func main (){
     }()
     go func(){
         for{
+            if len(s.registry.agents) < 1 {
+                continue
+            }
             jobData , err := redisSvc.Redis.BRPopLPush(context.Background() , "tasks:pending", "tasks:processing",5*time.Second ).Result()
             if err != nil {
                 if err == redis.Nil {
@@ -305,6 +315,7 @@ func main (){
                 continue
             }
             job := Job{}
+            println(jobData)
             if err := json.Unmarshal([]byte(jobData), &job); err != nil {
                 log.Printf("Payload corruption: %v", err)
                 continue

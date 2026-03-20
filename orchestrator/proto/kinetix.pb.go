@@ -21,6 +21,55 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type TaskStatus int32
+
+const (
+	TaskStatus_SUCCESS  TaskStatus = 0
+	TaskStatus_FAILED   TaskStatus = 1
+	TaskStatus_REJECTED TaskStatus = 2
+)
+
+// Enum value maps for TaskStatus.
+var (
+	TaskStatus_name = map[int32]string{
+		0: "SUCCESS",
+		1: "FAILED",
+		2: "REJECTED",
+	}
+	TaskStatus_value = map[string]int32{
+		"SUCCESS":  0,
+		"FAILED":   1,
+		"REJECTED": 2,
+	}
+)
+
+func (x TaskStatus) Enum() *TaskStatus {
+	p := new(TaskStatus)
+	*p = x
+	return p
+}
+
+func (x TaskStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TaskStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_kinetix_proto_enumTypes[0].Descriptor()
+}
+
+func (TaskStatus) Type() protoreflect.EnumType {
+	return &file_kinetix_proto_enumTypes[0]
+}
+
+func (x TaskStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TaskStatus.Descriptor instead.
+func (TaskStatus) EnumDescriptor() ([]byte, []int) {
+	return file_kinetix_proto_rawDescGZIP(), []int{0}
+}
+
 type WorkerStatus int32
 
 const (
@@ -57,11 +106,11 @@ func (x WorkerStatus) String() string {
 }
 
 func (WorkerStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_kinetix_proto_enumTypes[0].Descriptor()
+	return file_kinetix_proto_enumTypes[1].Descriptor()
 }
 
 func (WorkerStatus) Type() protoreflect.EnumType {
-	return &file_kinetix_proto_enumTypes[0]
+	return &file_kinetix_proto_enumTypes[1]
 }
 
 func (x WorkerStatus) Number() protoreflect.EnumNumber {
@@ -70,7 +119,7 @@ func (x WorkerStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use WorkerStatus.Descriptor instead.
 func (WorkerStatus) EnumDescriptor() ([]byte, []int) {
-	return file_kinetix_proto_rawDescGZIP(), []int{0}
+	return file_kinetix_proto_rawDescGZIP(), []int{1}
 }
 
 type WorkerSignal struct {
@@ -78,10 +127,11 @@ type WorkerSignal struct {
 	WorkerId        string                 `protobuf:"bytes,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
 	CpuPercentage   float32                `protobuf:"fixed32,2,opt,name=cpu_percentage,json=cpuPercentage,proto3" json:"cpu_percentage,omitempty"`
 	TotalCores      uint32                 `protobuf:"varint,3,opt,name=total_cores,json=totalCores,proto3" json:"total_cores,omitempty"`
-	TotalMemory     uint32                 `protobuf:"varint,4,opt,name=total_memory,json=totalMemory,proto3" json:"total_memory,omitempty"`
-	AvailableMemory uint32                 `protobuf:"varint,5,opt,name=available_memory,json=availableMemory,proto3" json:"available_memory,omitempty"`
+	TotalMemory     uint64                 `protobuf:"varint,4,opt,name=total_memory,json=totalMemory,proto3" json:"total_memory,omitempty"`
+	AvailableMemory uint64                 `protobuf:"varint,5,opt,name=available_memory,json=availableMemory,proto3" json:"available_memory,omitempty"`
 	Status          WorkerStatus           `protobuf:"varint,6,opt,name=status,proto3,enum=kinetix.WorkerStatus" json:"status,omitempty"`
 	IntegrityReport string                 `protobuf:"bytes,7,opt,name=integrity_report,json=integrityReport,proto3" json:"integrity_report,omitempty"`
+	Result          *TaskResult            `protobuf:"bytes,8,opt,name=result,proto3" json:"result,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -137,14 +187,14 @@ func (x *WorkerSignal) GetTotalCores() uint32 {
 	return 0
 }
 
-func (x *WorkerSignal) GetTotalMemory() uint32 {
+func (x *WorkerSignal) GetTotalMemory() uint64 {
 	if x != nil {
 		return x.TotalMemory
 	}
 	return 0
 }
 
-func (x *WorkerSignal) GetAvailableMemory() uint32 {
+func (x *WorkerSignal) GetAvailableMemory() uint64 {
 	if x != nil {
 		return x.AvailableMemory
 	}
@@ -165,6 +215,97 @@ func (x *WorkerSignal) GetIntegrityReport() string {
 	return ""
 }
 
+func (x *WorkerSignal) GetResult() *TaskResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+type TaskResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Status        TaskStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=kinetix.TaskStatus" json:"status,omitempty"`
+	ExitCode      int32                  `protobuf:"varint,3,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	Output        []byte                 `protobuf:"bytes,5,opt,name=output,proto3" json:"output,omitempty"`
+	CompletedAt   int64                  `protobuf:"varint,6,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskResult) Reset() {
+	*x = TaskResult{}
+	mi := &file_kinetix_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskResult) ProtoMessage() {}
+
+func (x *TaskResult) ProtoReflect() protoreflect.Message {
+	mi := &file_kinetix_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskResult.ProtoReflect.Descriptor instead.
+func (*TaskResult) Descriptor() ([]byte, []int) {
+	return file_kinetix_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *TaskResult) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskResult) GetStatus() TaskStatus {
+	if x != nil {
+		return x.Status
+	}
+	return TaskStatus_SUCCESS
+}
+
+func (x *TaskResult) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *TaskResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *TaskResult) GetOutput() []byte {
+	if x != nil {
+		return x.Output
+	}
+	return nil
+}
+
+func (x *TaskResult) GetCompletedAt() int64 {
+	if x != nil {
+		return x.CompletedAt
+	}
+	return 0
+}
+
 type BrainSignal struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Event:
@@ -178,7 +319,7 @@ type BrainSignal struct {
 
 func (x *BrainSignal) Reset() {
 	*x = BrainSignal{}
-	mi := &file_kinetix_proto_msgTypes[1]
+	mi := &file_kinetix_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -190,7 +331,7 @@ func (x *BrainSignal) String() string {
 func (*BrainSignal) ProtoMessage() {}
 
 func (x *BrainSignal) ProtoReflect() protoreflect.Message {
-	mi := &file_kinetix_proto_msgTypes[1]
+	mi := &file_kinetix_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -203,7 +344,7 @@ func (x *BrainSignal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BrainSignal.ProtoReflect.Descriptor instead.
 func (*BrainSignal) Descriptor() ([]byte, []int) {
-	return file_kinetix_proto_rawDescGZIP(), []int{1}
+	return file_kinetix_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *BrainSignal) GetEvent() isBrainSignal_Event {
@@ -251,7 +392,7 @@ type TaskAssignment struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	WasmBinary    []byte                 `protobuf:"bytes,2,opt,name=wasm_binary,json=wasmBinary,proto3" json:"wasm_binary,omitempty"`
-	FuelLimit     uint32                 `protobuf:"varint,3,opt,name=fuel_limit,json=fuelLimit,proto3" json:"fuel_limit,omitempty"`
+	FuelLimit     uint64                 `protobuf:"varint,3,opt,name=fuel_limit,json=fuelLimit,proto3" json:"fuel_limit,omitempty"`
 	Env           map[string]string      `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -259,7 +400,7 @@ type TaskAssignment struct {
 
 func (x *TaskAssignment) Reset() {
 	*x = TaskAssignment{}
-	mi := &file_kinetix_proto_msgTypes[2]
+	mi := &file_kinetix_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -271,7 +412,7 @@ func (x *TaskAssignment) String() string {
 func (*TaskAssignment) ProtoMessage() {}
 
 func (x *TaskAssignment) ProtoReflect() protoreflect.Message {
-	mi := &file_kinetix_proto_msgTypes[2]
+	mi := &file_kinetix_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -284,7 +425,7 @@ func (x *TaskAssignment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskAssignment.ProtoReflect.Descriptor instead.
 func (*TaskAssignment) Descriptor() ([]byte, []int) {
-	return file_kinetix_proto_rawDescGZIP(), []int{2}
+	return file_kinetix_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TaskAssignment) GetTaskId() string {
@@ -301,7 +442,7 @@ func (x *TaskAssignment) GetWasmBinary() []byte {
 	return nil
 }
 
-func (x *TaskAssignment) GetFuelLimit() uint32 {
+func (x *TaskAssignment) GetFuelLimit() uint64 {
 	if x != nil {
 		return x.FuelLimit
 	}
@@ -324,7 +465,7 @@ type HeartbeatAck struct {
 
 func (x *HeartbeatAck) Reset() {
 	*x = HeartbeatAck{}
-	mi := &file_kinetix_proto_msgTypes[3]
+	mi := &file_kinetix_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -336,7 +477,7 @@ func (x *HeartbeatAck) String() string {
 func (*HeartbeatAck) ProtoMessage() {}
 
 func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
-	mi := &file_kinetix_proto_msgTypes[3]
+	mi := &file_kinetix_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -349,7 +490,7 @@ func (x *HeartbeatAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatAck.ProtoReflect.Descriptor instead.
 func (*HeartbeatAck) Descriptor() ([]byte, []int) {
-	return file_kinetix_proto_rawDescGZIP(), []int{3}
+	return file_kinetix_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *HeartbeatAck) GetServerTime() int64 {
@@ -363,16 +504,25 @@ var File_kinetix_proto protoreflect.FileDescriptor
 
 const file_kinetix_proto_rawDesc = "" +
 	"\n" +
-	"\rkinetix.proto\x12\akinetix\"\x9b\x02\n" +
+	"\rkinetix.proto\x12\akinetix\"\xc8\x02\n" +
 	"\fWorkerSignal\x12\x1b\n" +
 	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12%\n" +
 	"\x0ecpu_percentage\x18\x02 \x01(\x02R\rcpuPercentage\x12\x1f\n" +
 	"\vtotal_cores\x18\x03 \x01(\rR\n" +
 	"totalCores\x12!\n" +
-	"\ftotal_memory\x18\x04 \x01(\rR\vtotalMemory\x12)\n" +
-	"\x10available_memory\x18\x05 \x01(\rR\x0favailableMemory\x12-\n" +
+	"\ftotal_memory\x18\x04 \x01(\x04R\vtotalMemory\x12)\n" +
+	"\x10available_memory\x18\x05 \x01(\x04R\x0favailableMemory\x12-\n" +
 	"\x06status\x18\x06 \x01(\x0e2\x15.kinetix.WorkerStatusR\x06status\x12)\n" +
-	"\x10integrity_report\x18\a \x01(\tR\x0fintegrityReport\"p\n" +
+	"\x10integrity_report\x18\a \x01(\tR\x0fintegrityReport\x12+\n" +
+	"\x06result\x18\b \x01(\v2\x13.kinetix.TaskResultR\x06result\"\xc0\x01\n" +
+	"\n" +
+	"TaskResult\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12+\n" +
+	"\x06status\x18\x02 \x01(\x0e2\x13.kinetix.TaskStatusR\x06status\x12\x1b\n" +
+	"\texit_code\x18\x03 \x01(\x05R\bexitCode\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12\x16\n" +
+	"\x06output\x18\x05 \x01(\fR\x06output\x12!\n" +
+	"\fcompleted_at\x18\x06 \x01(\x03R\vcompletedAt\"p\n" +
 	"\vBrainSignal\x12-\n" +
 	"\x04task\x18\x01 \x01(\v2\x17.kinetix.TaskAssignmentH\x00R\x04task\x12)\n" +
 	"\x03ack\x18\x02 \x01(\v2\x15.kinetix.HeartbeatAckH\x00R\x03ackB\a\n" +
@@ -382,14 +532,20 @@ const file_kinetix_proto_rawDesc = "" +
 	"\vwasm_binary\x18\x02 \x01(\fR\n" +
 	"wasmBinary\x12\x1d\n" +
 	"\n" +
-	"fuel_limit\x18\x03 \x01(\rR\tfuelLimit\x122\n" +
+	"fuel_limit\x18\x03 \x01(\x04R\tfuelLimit\x122\n" +
 	"\x03env\x18\x04 \x03(\v2 .kinetix.TaskAssignment.EnvEntryR\x03env\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"/\n" +
 	"\fHeartbeatAck\x12\x1f\n" +
 	"\vserver_time\x18\x01 \x01(\x03R\n" +
-	"serverTime*J\n" +
+	"serverTime*3\n" +
+	"\n" +
+	"TaskStatus\x12\v\n" +
+	"\aSUCCESS\x10\x00\x12\n" +
+	"\n" +
+	"\x06FAILED\x10\x01\x12\f\n" +
+	"\bREJECTED\x10\x02*J\n" +
 	"\fWorkerStatus\x12\b\n" +
 	"\x04IDLE\x10\x00\x12\b\n" +
 	"\x04BUSY\x10\x01\x12\x0f\n" +
@@ -410,28 +566,32 @@ func file_kinetix_proto_rawDescGZIP() []byte {
 	return file_kinetix_proto_rawDescData
 }
 
-var file_kinetix_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kinetix_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_kinetix_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_kinetix_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_kinetix_proto_goTypes = []any{
-	(WorkerStatus)(0),      // 0: kinetix.WorkerStatus
-	(*WorkerSignal)(nil),   // 1: kinetix.WorkerSignal
-	(*BrainSignal)(nil),    // 2: kinetix.BrainSignal
-	(*TaskAssignment)(nil), // 3: kinetix.TaskAssignment
-	(*HeartbeatAck)(nil),   // 4: kinetix.HeartbeatAck
-	nil,                    // 5: kinetix.TaskAssignment.EnvEntry
+	(TaskStatus)(0),        // 0: kinetix.TaskStatus
+	(WorkerStatus)(0),      // 1: kinetix.WorkerStatus
+	(*WorkerSignal)(nil),   // 2: kinetix.WorkerSignal
+	(*TaskResult)(nil),     // 3: kinetix.TaskResult
+	(*BrainSignal)(nil),    // 4: kinetix.BrainSignal
+	(*TaskAssignment)(nil), // 5: kinetix.TaskAssignment
+	(*HeartbeatAck)(nil),   // 6: kinetix.HeartbeatAck
+	nil,                    // 7: kinetix.TaskAssignment.EnvEntry
 }
 var file_kinetix_proto_depIdxs = []int32{
-	0, // 0: kinetix.WorkerSignal.status:type_name -> kinetix.WorkerStatus
-	3, // 1: kinetix.BrainSignal.task:type_name -> kinetix.TaskAssignment
-	4, // 2: kinetix.BrainSignal.ack:type_name -> kinetix.HeartbeatAck
-	5, // 3: kinetix.TaskAssignment.env:type_name -> kinetix.TaskAssignment.EnvEntry
-	1, // 4: kinetix.Orchestrator.Subscribe:input_type -> kinetix.WorkerSignal
-	2, // 5: kinetix.Orchestrator.Subscribe:output_type -> kinetix.BrainSignal
-	5, // [5:6] is the sub-list for method output_type
-	4, // [4:5] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	1, // 0: kinetix.WorkerSignal.status:type_name -> kinetix.WorkerStatus
+	3, // 1: kinetix.WorkerSignal.result:type_name -> kinetix.TaskResult
+	0, // 2: kinetix.TaskResult.status:type_name -> kinetix.TaskStatus
+	5, // 3: kinetix.BrainSignal.task:type_name -> kinetix.TaskAssignment
+	6, // 4: kinetix.BrainSignal.ack:type_name -> kinetix.HeartbeatAck
+	7, // 5: kinetix.TaskAssignment.env:type_name -> kinetix.TaskAssignment.EnvEntry
+	2, // 6: kinetix.Orchestrator.Subscribe:input_type -> kinetix.WorkerSignal
+	4, // 7: kinetix.Orchestrator.Subscribe:output_type -> kinetix.BrainSignal
+	7, // [7:8] is the sub-list for method output_type
+	6, // [6:7] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_kinetix_proto_init() }
@@ -439,7 +599,7 @@ func file_kinetix_proto_init() {
 	if File_kinetix_proto != nil {
 		return
 	}
-	file_kinetix_proto_msgTypes[1].OneofWrappers = []any{
+	file_kinetix_proto_msgTypes[2].OneofWrappers = []any{
 		(*BrainSignal_Task)(nil),
 		(*BrainSignal_Ack)(nil),
 	}
@@ -448,8 +608,8 @@ func file_kinetix_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kinetix_proto_rawDesc), len(file_kinetix_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   5,
+			NumEnums:      2,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

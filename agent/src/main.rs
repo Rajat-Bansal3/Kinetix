@@ -28,12 +28,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             sys.refresh_all();
             let signal = WorkerSignal {
                 worker_id: "test-worker-1".to_string(),
-                available_memory: (sys.available_memory() / 1024 / 1024) as u32,
-                total_memory: (sys.total_memory() / 1024 / 1024) as u32,
+                available_memory: (sys.available_memory() / 1024 / 1024),
+                total_memory: (sys.total_memory() / 1024 / 1024),
                 cpu_percentage: sys.global_cpu_usage(),
                 total_cores: sys.cpus().len() as u32,
                 integrity_report: "OK".to_string(),
                 status: hearbeat_state.get_status() as i32,
+                result: None,
             };
 
             if let Err(e) = heartbeat_tx.send(signal).await {
@@ -51,6 +52,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Task: {}", task.task_id);
                 tasks_state.set_status(WorkerStatus::Busy);
                 tasks_state.perform_task(task);
+                if let Err(e) = tasks_state.execute_task() {
+                    eprintln!("execute_task error: {}", e);
+                }
             }
             Some(pb::brain_signal::Event::Ack(ack)) => {
                 println!("Server Time: {}", ack.server_time);

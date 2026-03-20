@@ -12,10 +12,26 @@ message WorkerSignal {
   string worker_id = 1;
   float cpu_percentage = 2;
   uint32 total_cores = 3;
-  uint32 total_memory = 4;
-  uint32 available_memory = 5;
+  uint64 total_memory = 4;
+  uint64 available_memory = 5;
   WorkerStatus status = 6;
   string integrity_report = 7;
+  TaskResult result = 8;
+}
+
+message TaskResult {
+  string task_id = 1;
+  TaskStatus status = 2;
+  int32 exit_code = 3;
+  string error = 4;      
+  bytes output = 5;      
+  int64 completed_at = 6;
+}
+
+enum TaskStatus {
+  SUCCESS = 0;
+  FAILED = 1;
+  REJECTED = 2; 
 }
 
 enum WorkerStatus {
@@ -35,7 +51,7 @@ message BrainSignal {
 message TaskAssignment {
   string task_id = 1;
   bytes wasm_binary = 2;      
-  uint32 fuel_limit = 3;      
+  uint64 fuel_limit = 3;      
   map<string, string> env = 4; 
 }
 
