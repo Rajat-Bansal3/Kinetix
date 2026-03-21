@@ -64,8 +64,6 @@ type Payload struct {
 
 // orchestration functions
 func (s *OrchestratorServer)AssignTasks(ctx context.Context , rdb *redis.Client , task *pb.TaskAssignment)error {
-    fmt.Printf("task:assignTask: %+v\n", task)
-    log.Printf("task %s" , task.TaskId)
     s.registry.mu.Lock()
     if len(s.registry.ids) == 0 {
         s.registry.mu.Unlock()
@@ -88,7 +86,6 @@ func (s *OrchestratorServer)AssignTasks(ctx context.Context , rdb *redis.Client 
     if (err != nil) || (e != nil) {
         return fmt.Errorf("error setting owner hash or setting job details")
     }
-    println("Reached here")
     return agent.Stream.Send(&pb.BrainSignal{
         Event: &pb.BrainSignal_Task{
             Task: &pb.TaskAssignment{
@@ -144,7 +141,6 @@ func (s *OrchestratorServer) reaper (ctx context.Context , rdb *redis.Client){
 func (r *AgentRegistry) Register(sig *pb.WorkerSignal , stream pb.Orchestrator_SubscribeServer) {
     r.mu.Lock()
     defer r.mu.Unlock()
-    println("Registered")
     if _ , exists := r.agents[sig.WorkerId]; !exists {
         r.ids = append(r.ids, sig.WorkerId)
     }
@@ -312,7 +308,6 @@ func main (){
             if er := protojson.Unmarshal([]byte(jobData), job); er != nil {
                 fmt.Println("error unmarshling job:main")
             }
-            fmt.Printf("task:main: %+v\n", job)
 
             if err := s.AssignTasks(rdb.Context(), rdb, job); err != nil {
                 log.Printf("AssignTasks failed: %v", err)

@@ -74,7 +74,6 @@ impl AgentState {
         }
         let tasks: Vec<TaskAssignment> = self.tasks.read().unwrap().iter().cloned().collect();
         for task in tasks {
-            println!("executing task , {:?}", task);
             let state = self.clone();
             let tx = result_tx.clone();
             tokio::task::spawn_blocking(move || {

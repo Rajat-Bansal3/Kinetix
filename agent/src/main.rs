@@ -55,7 +55,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let total = sys.total_memory();
                 tasks_state.set_status(WorkerStatus::Busy);
                 let task_id = task.task_id.clone();
-                println!("Reached here");
 
                 match tasks_state.perform_task(task, available, total) {
                     Err(e) => {
@@ -76,7 +75,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
                     Ok(_) => {
-                        println!("Reached here");
                         if let Err(e) = tasks_state.execute_task(available, tx.clone()) {
                             eprintln!("execute_task error: {}", e);
                         }
