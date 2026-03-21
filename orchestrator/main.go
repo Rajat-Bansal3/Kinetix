@@ -1,5 +1,6 @@
 package main
 
+//imports
 import (
 	"context"
 	"flag"
@@ -23,11 +24,15 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
+//flags
 var (
     port_grpc  = flag.Int("port-grpc" , 50051 , "port the GRPC server is running on")
     port_http  = flag.Int("port-http" , 5000 , "port the HTTP server is running on")
+    redis_url  = flag.String("redis-url" , "localhost:6379" , "set the redis url defaults to localhost:6379")
 )
 
+
+//structs 
 type Agent struct {
     ID string
     Stream pb.Orchestrator_SubscribeServer
@@ -39,14 +44,12 @@ type Agent struct {
     AvailableMemory uint64
     Status pb.WorkerStatus
 }
-
 type AgentRegistry struct {
     mu sync.RWMutex
     agents map[string]*Agent
     ids    []string 
     next   int
 }
-
 type OrchestratorServer struct{
     pb.UnimplementedOrchestratorServer
     registry *AgentRegistry
@@ -58,6 +61,8 @@ type Payload struct {
     Binary     []byte `json:"binary"`
 }
 
+
+// orchestration functions
 func (s *OrchestratorServer)AssignTasks(ctx context.Context , rdb *redis.Client , task *pb.TaskAssignment)error {
     fmt.Printf("task:assignTask: %+v\n", task)
     log.Printf("task %s" , task.TaskId)
@@ -113,7 +118,6 @@ func (s *OrchestratorServer) reclaimJob (ctx context.Context , rdb *redis.Client
         }
     }
 }
-
 func (s *OrchestratorServer) reaper (ctx context.Context , rdb *redis.Client){
     ticker := time.NewTicker(10 * time.Second)
     for {
@@ -137,7 +141,6 @@ func (s *OrchestratorServer) reaper (ctx context.Context , rdb *redis.Client){
         }
     }
 }
-
 func (r *AgentRegistry) Register(sig *pb.WorkerSignal , stream pb.Orchestrator_SubscribeServer) {
     r.mu.Lock()
     defer r.mu.Unlock()
@@ -157,7 +160,6 @@ func (r *AgentRegistry) Register(sig *pb.WorkerSignal , stream pb.Orchestrator_S
     };
 
 }
-
 func (r *AgentRegistry) Unregister(id string) {
     r.mu.Lock()
     defer r.mu.Unlock()
@@ -181,15 +183,6 @@ func (r *AgentRegistry) Unregister(id string) {
         }
     }
 }
-
-func (r *AgentRegistry) GetStream(id string) (pb.Orchestrator_SubscribeServer, bool) {
-    r.mu.RLock()
-    defer r.mu.RUnlock()
-
-    stream, ok := r.agents[id]
-    return stream.Stream, ok
-}
-
 func(s *OrchestratorServer) Result(sig *pb.WorkerSignal){
     result := sig.Result
     ctx := context.Background()
@@ -214,7 +207,6 @@ func(s *OrchestratorServer) Result(sig *pb.WorkerSignal){
 
     }
 }
-
 func (r *AgentRegistry) UpdateHealth(signal *pb.WorkerSignal) {
     r.mu.Lock()
     defer r.mu.Unlock()
@@ -270,45 +262,14 @@ func (s *OrchestratorServer)Subscribe(stream pb.Orchestrator_SubscribeServer)err
     }
 }
 
-func (s *OrchestratorServer)debug_loop() {
-    ticker := time.NewTicker(5 * time.Second)
-    defer ticker.Stop()
-
-    for {
-        <-ticker.C
-        s.registry.mu.RLock()
-        
-        fmt.Println("\n--- 🔍 Orchestrator Internal State ---")
-        fmt.Printf("Total Registered Agents: %d\n", len(s.registry.agents))
-        fmt.Printf("Round-Robin Next Index:  %d\n", s.registry.next)
-        
-        if len(s.registry.agents) > 0 {
-            fmt.Printf("%-15s | %-10s | %-6s | %-8s\n", "WORKER ID", "STATUS", "CPU %", "MEM AVAIL")
-            for id, agent := range s.registry.agents {
-                fmt.Printf("%-15s | %-10v | %-6.2f | %-8d MB\n", 
-                    id, 
-                    agent.Status, 
-                    agent.CPU, 
-                    agent.AvailableMemory,
-                )
-            }
-        } else {
-            fmt.Println("No agents currently connected.")
-        }
-        fmt.Println("--------------------------------------")
-        
-        s.registry.mu.RUnlock()
-    }
-}
-
 func main (){
     flag.Parse()
+    //service initialisation
     rdb := redis.NewClient(&redis.Options{
-        Addr:     "localhost:6379",
+        Addr:     *redis_url,
         Password: "",
         DB:       0,
     })
-
     redisSvc := rh.NewHandler(rdb)
     s := &OrchestratorServer{
             registry: &AgentRegistry{
@@ -316,6 +277,8 @@ func main (){
             },
             rdb: rdb,
         }
+
+    //main grpc loop
 	go func(){
         lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port_grpc))
         if err != nil {
@@ -330,6 +293,7 @@ func main (){
             log.Fatal(err)
         }
     }()
+    //jobs reclaim loop
     go func(){
         for{
             if len(s.registry.agents) < 1 {
@@ -355,15 +319,14 @@ func main (){
             }
         }
     }()
+    //agents unregistering loop
     go s.reaper(context.Background() , rdb)
-    go s.debug_loop()
     e := echo.New()
     
-    
+    //route for job ingress
     routes.SetupHttpRoutes(e, redisSvc)
 
-    log.Printf("HTTP server running on port %d", *port_http)
-    
+    // main http server
     if err := e.Start(fmt.Sprintf(":%d" , *port_http)); err != nil {
         log.Fatal("failed to start server", "error", err)
     }
